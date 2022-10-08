@@ -1,11 +1,12 @@
 import axios, { AxiosError } from 'axios'
 import { parseCookies, setCookie } from 'nookies'
+import { SignOut } from '../contexts/AuthContext';
 
 interface AxiosErrorResponse {
   code?: string;
 }
 
-let cookies = parseCookies(undefined);
+let cookies = parseCookies();
 let isRefreshing = false;
 let failedrequestsQueue = [];
 
@@ -22,7 +23,7 @@ api.interceptors.response.use(response => {
   if(error.response.status === 401) {
     if(error.response.data?.code === 'token.expired') {
       //renovar o token
-      cookies = parseCookies(undefined);
+      cookies = parseCookies();
 
       const {'signinauth.refreshToken': refreshToken} = cookies;
       //error.config -> carrega todas as informações da requisição original 
@@ -33,7 +34,6 @@ api.interceptors.response.use(response => {
         api.post('/refresh', {
           refreshToken,
         }).then(response => {
-          console.log(response)
           const { token, refreshToken } = response.data;
   
           setCookie(undefined, 'signinauth.token', token, {
@@ -73,7 +73,9 @@ api.interceptors.response.use(response => {
       })
 
     } else {
-      //deslogar o usuário
+      SignOut();
     }
   }
+
+  return Promise.reject(error)
 });
