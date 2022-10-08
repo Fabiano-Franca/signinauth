@@ -5,7 +5,9 @@ interface AxiosErrorResponse {
   code?: string;
 }
 
-let cookies = parseCookies();
+let cookies = parseCookies(undefined);
+let isRefreshing = false;
+let failedrequestsQueue = [];
 
 export const api = axios.create({
   baseURL: 'http://localhost:3333',
@@ -20,27 +22,55 @@ api.interceptors.response.use(response => {
   if(error.response.status === 401) {
     if(error.response.data?.code === 'token.expired') {
       //renovar o token
-      cookies = parseCookies();
+      cookies = parseCookies(undefined);
 
       const {'signinauth.refreshToken': refreshToken} = cookies;
+      //error.config -> carrega todas as informações da requisição original 
+      //que falhou, sendo assim possível repeti-las.
+      const originalConfig = error.config
 
-      api.post('/refresh', {
-        refreshToken,
-      }).then(response => {
-        const { token } = response.data;
+      if(!isRefreshing){
+        api.post('/refresh', {
+          refreshToken,
+        }).then(response => {
+          console.log(response)
+          const { token, refreshToken } = response.data;
+  
+          setCookie(undefined, 'signinauth.token', token, {
+            maxAge: 60 * 60 * 24 * 30, //30 dias
+            path: '/',
+          })
+          setCookie(undefined, 'signinauth.refreshToken', refreshToken, {
+            maxAge: 60 * 60 * 24 * 30, //30 dias
+            path: '/',
+          })
+  
+          api.defaults.headers['Authorization'] = `Bearer ${token}`;
+          
+          //Faz a chamada novamente para todas as requisições que falharam
+          failedrequestsQueue.forEach(request => request.onSuccess(token))
+          failedrequestsQueue = [];
+        }).catch(err => {
+          //Faz a chamada novamente para todas as requisições que falharam
+          failedrequestsQueue.forEach(request => request.onFailure(err))
+          failedrequestsQueue = [];
+        }).finally(() => {
+          isRefreshing = false;
+        });
+      }
 
-        setCookie(undefined, 'signinauth.token', token, {
-          maxAge: 60 * 60 * 24 * 30, //30 dias
-          path: '/',
+      return new Promise((resolve, reject) => {
+        failedrequestsQueue.push({
+          onSuccess: (token: string) => {
+            originalConfig.headers['Authorization'] = `Bearer ${token}`
+
+            resolve(api(originalConfig))
+          },
+          onFailure: (err: AxiosError) => {
+            reject(err)
+          }
         })
-        setCookie(undefined, 'signinauth.refreshToken', response.data.refreshToken, {
-          maxAge: 60 * 60 * 24 * 30, //30 dias
-          path: '/',
-        })
-
-        api.defaults.headers['Authorization'] = `Bearer ${token}`;
-
-      });
+      })
 
     } else {
       //deslogar o usuário
