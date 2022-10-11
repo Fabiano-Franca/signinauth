@@ -17,7 +17,8 @@ type SignInCredentials = {
 
 //O que eu quero salvar de informações do usuário
 type AuthContextData = {
-  signIn(credentials: SignInCredentials): Promise<void>;
+  signIn: (credentials: SignInCredentials) => Promise<void>;
+  signOut: () => void;
   user: User;
   isAuthenticated: boolean;
 };
@@ -29,9 +30,15 @@ type AuthProviderProps = {
 
 export const AuthContext = createContext({} as AuthContextData)
 
-export function SignOut() {
+//1. Criando o canal de comunicação.
+let authChannel: BroadcastChannel
+
+export function signOut() {
   destroyCookie(undefined, 'signinauth.token')
   destroyCookie(undefined, 'signinauth.refreshToken')
+
+  //2. Envia a mensagem quando o usuário desloga
+  authChannel.postMessage('signOut');
 
   Router.push('/')
 }
@@ -40,9 +47,27 @@ export function AuthProdiver({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User>()
   const isAuthenticated = !!user;
 
+  //3. Ouvi a mensagem
+  useEffect(() => {
+    authChannel = new BroadcastChannel('auth');
+    authChannel.onmessage = (message) => {
+      switch(message.data) {
+        case 'signOut':
+          signOut();
+          break;
+        // case 'signIn':
+        //   Router.push('/dashboard')
+        //   break;
+        default:
+          break;
+      }
+    }
+  }, [])
+
   useEffect(() => {
     const {'signinauth.token': token} = parseCookies()
 
+    //Busca as informações do usuário pelo token, quando ele já está autenticado.
     if(token) {
       api.get('/me').then(response => {
         const { email, permissions, roles} = response.data
@@ -50,7 +75,7 @@ export function AuthProdiver({ children }: AuthProviderProps) {
         setUser({email, permissions, roles})
       })
       .catch(() => {
-        SignOut();
+        signOut();
       })
     }
 
@@ -85,6 +110,7 @@ export function AuthProdiver({ children }: AuthProviderProps) {
 
       Router.push('/dashboard');
 
+      //authChannel.postMessage('signIn')
     } catch (err) {
       console.log(err)
     }
@@ -93,7 +119,7 @@ export function AuthProdiver({ children }: AuthProviderProps) {
 
   return (
     //Em "value" ficam os dados retornados
-    <AuthContext.Provider value={{ signIn, isAuthenticated, user }}>
+    <AuthContext.Provider value={{ signIn, signOut, isAuthenticated, user }}>
       {children}
     </AuthContext.Provider>
   )
